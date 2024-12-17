@@ -42,7 +42,7 @@ def load_json_file(file_path):
 
 def find_resources_in_state(state_data, modules):
     resources_to_import = []
-    excluded_types = {"aws_autoscaling_attachment", "aws_security_group_rule"}
+    excluded_types = {"aws_autoscaling_attachment"}  # aws_security_group_rule included back
 
     for resource in state_data.get("resources", []):
         mode = resource.get("mode", "managed")  # Default mode is "managed"
@@ -69,6 +69,14 @@ def find_resources_in_state(state_data, modules):
                     role = attributes.get("role")
                     policy_arn = attributes.get("policy_arn")
                     resource_id = f"{role}/{policy_arn}"
+                # Special case for aws_security_group_rule to format id properly
+                elif resource.get("type") == "aws_security_group_rule":
+                    security_group_id = attributes.get("security_group_id")
+                    rule_type = attributes.get("type")
+                    protocol = attributes.get("protocol")
+                    from_port = attributes.get("from_port")
+                    to_port = attributes.get("to_port")
+                    resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}"
 
                 resources_to_import.append({
                     "module": module_name,
