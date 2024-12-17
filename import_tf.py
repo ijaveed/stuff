@@ -76,7 +76,8 @@ def find_resources_in_state(state_data, modules):
                     protocol = attributes.get("protocol")
                     from_port = attributes.get("from_port")
                     to_port = attributes.get("to_port")
-                    resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}"
+                    cidr_blocks = ",".join(attributes.get("cidr_blocks", []))
+                    resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_{cidr_blocks}"
 
                 resources_to_import.append({
                     "module": module_name,
