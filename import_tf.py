@@ -42,16 +42,39 @@ def load_json_file(file_path):
 
 def find_resources_in_state(state_data, modules):
     resources_to_import = []
+    excluded_types = {"aws_autoscaling_attachment", "aws_security_group_rule"}
 
     for resource in state_data.get("resources", []):
+        mode = resource.get("mode", "managed")  # Default mode is "managed"
+        if mode != "managed":
+            continue  # Skip data resources
+
+        if resource.get("type") in excluded_types:
+            continue  # Skip excluded resource types
+
         module_name = resource.get("module")
         if module_name and any(module_name.startswith(m) for m in modules):
-            for instance in resource.get("instances", []):
+            for index, instance in enumerate(resource.get("instances", [])):
+                index_key = instance.get("index_key")  # Retrieve the optional index_key
+                resource_name = resource.get("name")
+                if index_key:  # Add index key if it exists
+                    resource_name = f'{resource_name}["{index_key}"]'
+                elif len(resource.get("instances", [])) > 1:  # Add index when multiple instances exist
+                    resource_name = f"{resource_name}[{index}]"
+
+                # Special case for aws_iam_role_policy_attachment to use 'role/policy_arn' as id
+                attributes = instance.get("attributes", {})
+                resource_id = attributes.get("id")
+                if resource.get("type") == "aws_iam_role_policy_attachment":
+                    role = attributes.get("role")
+                    policy_arn = attributes.get("policy_arn")
+                    resource_id = f"{role}/{policy_arn}"
+
                 resources_to_import.append({
                     "module": module_name,
                     "type": resource.get("type"),
-                    "name": resource.get("name"),
-                    "id": instance.get("attributes", {}).get("id"),
+                    "name": resource_name,
+                    "id": resource_id,
                 })
     
     return resources_to_import
