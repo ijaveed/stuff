@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import argparse
 import json
 
@@ -42,7 +43,7 @@ def load_json_file(file_path):
 
 def find_resources_in_state(state_data, modules):
     resources_to_import = []
-    excluded_types = {"aws_autoscaling_attachment"}  # aws_security_group_rule included back
+    excluded_types = {"aws_autoscaling_attachment"}  
 
     for resource in state_data.get("resources", []):
         mode = resource.get("mode", "managed")  # Default mode is "managed"
@@ -80,6 +81,10 @@ def find_resources_in_state(state_data, modules):
                 resource_id = f"{role}/{policy_arn}"
             # Special case for aws_security_group_rule to format id properly
             elif resource.get("type") == "aws_security_group_rule":
+                if index_key:  # Add index key if it exists
+                    full_name = f"{resource_namespace}{resource['type']}[\"{index_key}\"]"
+                elif len(resource.get("instances", [])) > 1:  # Add index when multiple instances exist
+                    full_name = f"{resource_namespace}{resource['type']}"
                 security_group_id = attributes.get("security_group_id")
                 rule_type = attributes.get("type")  # ingress or egress
                 protocol = attributes.get("protocol")
@@ -88,11 +93,11 @@ def find_resources_in_state(state_data, modules):
                 cidr_blocks = attributes.get("cidr_blocks", [])
                 source_security_group_id = attributes.get("source_security_group_id", "")
 
-                # Construct ID format
+               # Construct ID format
                 if source_security_group_id:
                     resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_self_{source_security_group_id}"
                 else:
-                    cidr_blocks_str = ",".join(cidr_blocks) if cidr_blocks else "_"
+                    cidr_blocks_str = "_".join(cidr_blocks) if cidr_blocks else "_"
                     resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_{cidr_blocks_str}"
 
             resources_to_import.append({
