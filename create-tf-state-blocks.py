@@ -1,4 +1,16 @@
 #!/usr/bin/python3
+import json
+import argparse
+
+def parse_tf_state(state_file):
+    """
+    Parses the Terraform state file to extract resources.
+    """
+    with open(state_file, 'r') as file:
+        state_data = json.load(file)
+
+    return state_data
+
 def find_resources_in_state(state_data, modules):
     resources_to_import = []
     excluded_types = {"aws_autoscaling_attachment"}  # Example of excluded resource types
@@ -77,4 +89,48 @@ def find_resources_in_state(state_data, modules):
             })
 
     return resources_to_import
+
+def generate_import_blocks(resources):
+    blocks = []
+    for resource in resources:
+        if resource["id"]:
+            block = f"import {{\n  address = \"{resource['name']}\"\n  id      = \"{resource['id']}\"\n}}\n"
+            blocks.append(block)
+    return blocks
+
+def write_output_file(blocks, output_file):
+    try:
+        with open(output_file, 'w') as file:
+            file.writelines(blocks)
+        print(f"Terraform import blocks written to {output_file}")
+    except Exception as e:
+        print(f"Error writing to output file {output_file}: {e}")
+        exit(1)
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate Terraform import blocks from a state file and modules list.")
+    parser.add_argument("--state-file", required=True, help="Path to the Terraform state file.")
+    parser.add_argument("--modules-file", required=True, help="Path to the modules list file.")
+    parser.add_argument("--output-file", required=True, help="Path to the output file for Terraform import blocks.")
+    args = parser.parse_args()
+
+    with open(args.modules_file, 'r') as file:
+        modules_list = [line.strip() for line in file if line.strip()]
+
+    state_data = parse_tf_state(args.state_file)
+    resources = find_resources_in_state(state_data, modules_list)
+
+    if not resources:
+        print("No matching resources found in the state file for the provided modules list.")
+        exit(0)
+
+    blocks = generate_import_blocks(resources)
+
+    if blocks:
+        write_output_file(blocks, args.output_file)
+    else:
+        print("No import blocks to generate.")
+
+if __name__ == "__main__":
+    main()
 
