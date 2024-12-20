@@ -1,100 +1,140 @@
 #!/usr/bin/python3
-import json
 import argparse
+import json
 
-def parse_tf_state(state_file):
-    """
-    Parses the Terraform state file to extract resources.
-    """
-    with open(state_file, 'r') as file:
-        state_data = json.load(file)
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Generate Terraform import blocks.")
+    parser.add_argument("--state-file", required=True, help="Path to the Terraform state file.")
+    parser.add_argument("--modules-file", required=True, help="Path to the modules list file.")
+    parser.add_argument("--output-file", required=True, help="Path to the output file for Terraform import blocks.")
+    return parser.parse_args()
 
-    return state_data
+def load_modules_file(file_path):
+    try:
+        with open(file_path, 'r') as file:
+            content = file.read().strip()
+            if not content:
+                raise ValueError("Modules file is empty.")
+            return [line.strip() for line in content.splitlines() if line.strip()]
+    except FileNotFoundError as e:
+        print(f"Error: File not found - {file_path}")
+        exit(1)
+    except ValueError as e:
+        print(f"Error: {e} - {file_path}")
+        exit(1)
+
+def load_json_file(file_path):
+    try:
+        with open(file_path, 'r') as file:
+            content = file.read().strip()
+            if not content:
+                raise ValueError("File is empty.")
+            return json.loads(content)
+    except FileNotFoundError as e:
+        print(f"Error: File not found - {file_path}")
+        exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Failed to parse JSON in file {file_path}. Check the file format.")
+        print(f"Details: {e}")
+        exit(1)
+    except ValueError as e:
+        print(f"Error: {e} - {file_path}")
+        exit(1)
 
 def find_resources_in_state(state_data, modules):
+    """
+    Finds resources in the Terraform state file that match the provided modules list,
+    including nested modules.
+    """
     resources_to_import = []
     excluded_types = {"aws_autoscaling_attachment"}  # Example of excluded resource types
 
-    for resource in state_data.get("resources", []):
-        mode = resource.get("mode", "managed")  # Default mode is "managed"
-        if mode != "managed":
-            print(f"Skipping data resource: {resource.get('type')}.{resource.get('name')}")
-            continue  # Skip data resources
+    def traverse_modules(resources, namespace=""):
+        for resource in resources:
+            mode = resource.get("mode", "managed")  # Default mode is "managed"
+            if mode != "managed":
+                print(f"Skipping data resource: {namespace}{resource.get('type')}.{resource.get('name')}")
+                continue  # Skip data resources
 
-        if resource.get("type") in excluded_types:
-            print(f"Skipping excluded resource type: {resource.get('type')}")
-            continue  # Skip excluded resource types
+            if resource.get("type") in excluded_types:
+                print(f"Skipping excluded resource type: {namespace}{resource.get('type')}")
+                continue  # Skip excluded resource types
 
-        resource_namespace = resource.get("module", "")  # Module namespace if exists
-        resource_type = resource.get("type")
-        resource_name = resource.get("name")
+            resource_namespace = f"{namespace}{resource.get('module', '')}"
+            if resource_namespace:
+                resource_namespace += "."
 
-        # Combine type and name to create the resource's identifier
-        type_name = f"{resource_type}.{resource_name}"
+            resource_type = resource.get("type")
+            resource_name = resource.get("name")
+            type_name = f"{resource_type}.{resource_name}"
 
-        print(f"Checking resource: {type_name} in namespace: {resource_namespace}")
+            print(f"Checking resource: {type_name} in namespace: {resource_namespace}")
 
-        # Check if the resource matches any of the specified modules
-        is_matching_module = any(
-            module in type_name or (resource_namespace and resource_namespace.startswith(module))
-            for module in modules
-        )
+            # Check if the resource matches any of the specified modules
+            is_matching_module = any(
+                module in type_name or resource_namespace.startswith(module)
+                for module in modules
+            )
 
-        if not is_matching_module:
-            print(f"Resource {type_name} does not match any modules in the list.")
-            continue
-
-        print(f"Matched resource: {type_name}")
-
-        # Process each instance of the resource
-        for index, instance in enumerate(resource.get("instances", [])):
-            index_key = instance.get("index_key")  # Retrieve the optional index_key
-            attributes = instance.get("attributes", {})
-            resource_id = attributes.get("id")
-
-            if not resource_id:
-                print(f"No ID found for resource: {type_name}")
+            if not is_matching_module:
+                print(f"Resource {type_name} does not match any modules in the list.")
                 continue
 
-            # Special handling for certain resource types
-            if resource_type == "aws_iam_role_policy_attachment":
-                role = attributes.get("role")
-                policy_arn = attributes.get("policy_arn")
-                resource_id = f"{role}/{policy_arn}"
-            elif resource_type == "aws_security_group_rule":
-                security_group_id = attributes.get("security_group_id")
-                rule_type = attributes.get("type")
-                protocol = attributes.get("protocol")
-                from_port = attributes.get("from_port")
-                to_port = attributes.get("to_port")
-                cidr_blocks = attributes.get("cidr_blocks", [])
-                source_security_group_id = attributes.get("source_security_group_id", "")
+            print(f"Matched resource: {type_name}")
 
-                # Construct ID format
-                if source_security_group_id:
-                    resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_self_{source_security_group_id}"
-                else:
-                    cidr_blocks_str = "_".join(cidr_blocks) if cidr_blocks else "_"
-                    resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_{cidr_blocks_str}"
+            for index, instance in enumerate(resource.get("instances", [])):
+                index_key = instance.get("index_key")  # Retrieve the optional index_key
+                attributes = instance.get("attributes", {})
+                resource_id = attributes.get("id")
 
-            # Construct full resource name
-            full_name = f"{resource_namespace}.{resource_type}[\"{index_key}\"]" if index_key else f"{resource_namespace}.{resource_type}.{resource_name}"
+                if not resource_id:
+                    print(f"No ID found for resource: {type_name}")
+                    continue
 
-            print(f"Adding resource: {full_name} with ID: {resource_id}")
+                # Special handling for certain resource types
+                if resource_type == "aws_iam_role_policy_attachment":
+                    role = attributes.get("role")
+                    policy_arn = attributes.get("policy_arn")
+                    resource_id = f"{role}/{policy_arn}"
+                elif resource_type == "aws_security_group_rule":
+                    security_group_id = attributes.get("security_group_id")
+                    rule_type = attributes.get("type")
+                    protocol = attributes.get("protocol")
+                    from_port = attributes.get("from_port")
+                    to_port = attributes.get("to_port")
+                    cidr_blocks = attributes.get("cidr_blocks", [])
+                    source_security_group_id = attributes.get("source_security_group_id", "")
 
-            # Add resource to the list
-            resources_to_import.append({
-                "name": full_name.strip("."),
-                "id": resource_id,
-            })
+                    # Construct ID format
+                    if source_security_group_id:
+                        resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_self_{source_security_group_id}"
+                    else:
+                        cidr_blocks_str = "_".join(cidr_blocks) if cidr_blocks else "_"
+                        resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_{cidr_blocks_str}"
 
+                # Construct full resource name
+                full_name = (
+                    f"{resource_namespace}{resource_type}[\"{index_key}\"]"
+                    if index_key
+                    else f"{resource_namespace}{resource_type}.{resource_name}"
+                )
+
+                print(f"Adding resource: {full_name} with ID: {resource_id}")
+
+                resources_to_import.append({
+                    "name": full_name.strip("."),
+                    "id": resource_id,
+                })
+
+    # Start traversing from the top level
+    traverse_modules(state_data.get("resources", []))
     return resources_to_import
 
 def generate_import_blocks(resources):
     blocks = []
     for resource in resources:
         if resource["id"]:
-            block = f"import {{\n  address = \"{resource['name']}\"\n  id      = \"{resource['id']}\"\n}}\n"
+            block = f"import {{\n  to = \"{resource['name']}\"\n  id      = \"{resource['id']}\"\n}}\n"
             blocks.append(block)
     return blocks
 
@@ -107,17 +147,12 @@ def write_output_file(blocks, output_file):
         print(f"Error writing to output file {output_file}: {e}")
         exit(1)
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate Terraform import blocks from a state file and modules list.")
-    parser.add_argument("--state-file", required=True, help="Path to the Terraform state file.")
-    parser.add_argument("--modules-file", required=True, help="Path to the modules list file.")
-    parser.add_argument("--output-file", required=True, help="Path to the output file for Terraform import blocks.")
-    args = parser.parse_args()
+if __name__ == "__main__":
+    args = parse_arguments()
 
-    with open(args.modules_file, 'r') as file:
-        modules_list = [line.strip() for line in file if line.strip()]
+    state_data = load_json_file(args.state_file)
+    modules_list = load_modules_file(args.modules_file)
 
-    state_data = parse_tf_state(args.state_file)
     resources = find_resources_in_state(state_data, modules_list)
 
     if not resources:
@@ -130,7 +165,4 @@ def main():
         write_output_file(blocks, args.output_file)
     else:
         print("No import blocks to generate.")
-
-if __name__ == "__main__":
-    main()
 
