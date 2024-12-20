@@ -91,6 +91,27 @@ def find_resources_in_state(state_data, modules):
                     print(f"No ID found for resource: {type_name}")
                     continue
 
+                # Special handling for certain resource types
+                if resource_type == "aws_iam_role_policy_attachment":
+                    role = attributes.get("role")
+                    policy_arn = attributes.get("policy_arn")
+                    resource_id = f"{role}/{policy_arn}"
+                elif resource_type == "aws_security_group_rule":
+                    security_group_id = attributes.get("security_group_id")
+                    rule_type = attributes.get("type")
+                    protocol = attributes.get("protocol")
+                    from_port = attributes.get("from_port")
+                    to_port = attributes.get("to_port")
+                    cidr_blocks = attributes.get("cidr_blocks", [])
+                    source_security_group_id = attributes.get("source_security_group_id", "")
+
+                    # Construct ID format
+                    if source_security_group_id:
+                        resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_self_{source_security_group_id}"
+                    else:
+                        cidr_blocks_str = "_".join(cidr_blocks) if cidr_blocks else "_"
+                        resource_id = f"{security_group_id}_{rule_type}_{protocol}_{from_port}_{to_port}_{cidr_blocks_str}"
+
                 # Handle deeply nested attribute paths
                 for attribute, value in attributes.items():
                     # Skip non-leaf attributes (dicts or lists)
